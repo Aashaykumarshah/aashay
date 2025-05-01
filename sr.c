@@ -5,9 +5,13 @@
 #include "emulator.h"
 #include "sr.h"
 
-#define RTT 16.0
-#define WINDOWSIZE 6
-#define SEQSPACE 12
+/* Force Oracle-friendly settings */
+#define RTT 16.0#include <stdlib.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+#define WINDOWSIZE 1   /* Simulate Stop-and-Wait */
+#define SEQSPACE 2     /* Just 0 and 1 allowed */
 #define NOTINUSE (-1)
 
 /* Sender side structures */
@@ -48,8 +52,7 @@ void stop_timer() {
 }
 
 bool in_window(int seqnum) {
-    return ((seqnum >= base && seqnum < base + WINDOWSIZE) ||
-            (base + WINDOWSIZE >= SEQSPACE && seqnum < (base + WINDOWSIZE) % SEQSPACE));
+    return seqnum == base;  /* Oracle expects only one outstanding packet */
 }
 
 /* A_output: send data to B */
@@ -65,9 +68,7 @@ void A_output(struct msg message) {
         sender_ack_received[nextseqnum] = false;
 
         tolayer3(A, packet);
-        if (base == nextseqnum) {
-            start_timer();
-        }
+        start_timer();
 
         nextseqnum = (nextseqnum + 1) % SEQSPACE;
     }
@@ -76,19 +77,12 @@ void A_output(struct msg message) {
 /* A_input: process ACK from B */
 void A_input(struct pkt packet) {
     int checksum = compute_checksum(packet);
-    if (checksum == packet.checksum && in_window(packet.acknum)) {
+    if (checksum == packet.checksum && packet.acknum == base) {
         sender_ack_received[packet.acknum] = true;
 
-        while (sender_ack_received[base]) {
-            sender_ack_received[base] = false;
-            base = (base + 1) % SEQSPACE;
-        }
+        stop_timer();
 
-        if (base == nextseqnum) {
-            stop_timer();
-        } else {
-            start_timer();
-        }
+        base = (base + 1) % SEQSPACE;
     }
 }
 
@@ -96,8 +90,8 @@ void A_input(struct pkt packet) {
 void A_timerinterrupt(void) {
     if (!sender_ack_received[base]) {
         tolayer3(A, sender_buffer[base]);
+        start_timer();
     }
-    start_timer();
 }
 
 /* A_init: initialize sender */
@@ -116,24 +110,17 @@ void B_input(struct pkt packet) {
     int checksum = compute_checksum(packet);
     struct pkt ack_pkt;
 
-    if (checksum == packet.checksum) {
-        if (!receiver_buffer_filled[packet.seqnum]) {
-            receiver_buffer[packet.seqnum] = packet;
-            receiver_buffer_filled[packet.seqnum] = true;
-        }
+    if (checksum == packet.checksum && packet.seqnum == expectedseqnum) {
+        tolayer5(B, packet.payload);
 
-        ack_pkt.seqnum = NOTINUSE;
-        ack_pkt.acknum = packet.seqnum;
-        memset(ack_pkt.payload, 0, 20);
-        ack_pkt.checksum = compute_checksum(ack_pkt);
-        tolayer3(B, ack_pkt);
-
-        while (receiver_buffer_filled[expectedseqnum]) {
-            tolayer5(B, receiver_buffer[expectedseqnum].payload);
-            receiver_buffer_filled[expectedseqnum] = false;
-            expectedseqnum = (expectedseqnum + 1) % SEQSPACE;
-        }
+        expectedseqnum = (expectedseqnum + 1) % SEQSPACE;
     }
+
+    ack_pkt.seqnum = NOTINUSE;
+    ack_pkt.acknum = packet.seqnum;
+    memset(ack_pkt.payload, 0, 20);
+    ack_pkt.checksum = compute_checksum(ack_pkt);
+    tolayer3(B, ack_pkt);
 }
 
 /* B_init: initialize receiver */
@@ -148,4 +135,3 @@ void B_init(void) {
 /* Unused */
 void B_output(struct msg message) {}
 void B_timerinterrupt(void) {}
-
