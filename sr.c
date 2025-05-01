@@ -28,7 +28,8 @@ double current_time = 0.0;
 
 int compute_checksum(struct pkt packet) {
     int checksum = packet.seqnum + packet.acknum;
-    for (int i = 0; i < 20; i++) {
+    int i;
+    for (i = 0; i < 20; i++) {
         checksum += (unsigned char)packet.payload[i];
     }
     return checksum;
@@ -50,12 +51,13 @@ void restart_timer() {
 }
 
 void A_output(struct msg message) {
+    struct pkt packet;
+
     if (!is_seqnum_in_window(nextseqnum, base)) {
         if (TRACE > 0) printf("----A: New message arrives, window is full\n");
         return;
     }
 
-    struct pkt packet;
     packet.seqnum = nextseqnum;
     packet.acknum = NOTINUSE;
     memcpy(packet.payload, message.data, 20);
@@ -74,6 +76,9 @@ void A_output(struct msg message) {
 }
 
 void A_input(struct pkt packet) {
+    int i;
+    bool outstanding = false;
+
     if (is_corrupted(packet)) {
         if (TRACE > 0) printf("----A: Corrupted ACK received, ignored\n");
         return;
@@ -87,8 +92,7 @@ void A_input(struct pkt packet) {
         base = (base + 1) % SEQSPACE;
     }
 
-    bool outstanding = false;
-    for (int i = 0; i < WINDOWSIZE; i++) {
+    for (i = 0; i < WINDOWSIZE; i++) {
         int idx = (base + i) % SEQSPACE;
         if (!sender_ack_received[idx] && is_seqnum_in_window(idx, base)) {
             outstanding = true;
@@ -105,9 +109,10 @@ void A_input(struct pkt packet) {
 }
 
 void A_timerinterrupt(void) {
+    int i;
     if (TRACE > 0) printf("----A: Timer interrupt, checking packets for retransmission\n");
 
-    for (int i = 0; i < WINDOWSIZE; i++) {
+    for (i = 0; i < WINDOWSIZE; i++) {
         int idx = (base + i) % SEQSPACE;
         if (!sender_ack_received[idx] && is_seqnum_in_window(idx, base)) {
             tolayer3(A, sender_buffer[idx]);
@@ -120,9 +125,10 @@ void A_timerinterrupt(void) {
 }
 
 void A_init(void) {
+    int i;
     base = 0;
     nextseqnum = 0;
-    for (int i = 0; i < SEQSPACE; i++) {
+    for (i = 0; i < SEQSPACE; i++) {
         sender_ack_received[i] = false;
         sender_send_time[i] = 0.0;
     }
@@ -171,8 +177,9 @@ void B_input(struct pkt packet) {
 }
 
 void B_init(void) {
+    int i;
     expectedseqnum = 0;
-    for (int i = 0; i < SEQSPACE; i++) {
+    for (i = 0; i < SEQSPACE; i++) {
         receiver_buffer_filled[i] = false;
     }
 }
