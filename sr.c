@@ -34,7 +34,7 @@ int compute_checksum(struct pkt packet) {
     return checksum;
 }
 
-/* Timer management */
+/* Timer control */
 void start_timer() {
     if (!timer_running) {
         starttimer(A, RTT);
@@ -47,17 +47,14 @@ void stop_timer() {
     timer_running = false;
 }
 
-bool is_seqnum_in_window(int seqnum) {
-    if (base <= (base + WINDOWSIZE - 1) % SEQSPACE) {
-        return (seqnum >= base) && (seqnum <= (base + WINDOWSIZE - 1) % SEQSPACE);
-    } else {
-        return (seqnum >= base) || (seqnum <= (base + WINDOWSIZE - 1) % SEQSPACE);
-    }
+bool in_window(int seqnum) {
+    return ((seqnum >= base && seqnum < base + WINDOWSIZE) ||
+            (base + WINDOWSIZE >= SEQSPACE && seqnum < (base + WINDOWSIZE) % SEQSPACE));
 }
 
-/* A_output: sends a message to B */
+/* A_output: send data to B */
 void A_output(struct msg message) {
-    if (is_seqnum_in_window(nextseqnum)) {
+    if (in_window(nextseqnum)) {
         struct pkt packet;
         packet.seqnum = nextseqnum;
         packet.acknum = NOTINUSE;
@@ -76,39 +73,34 @@ void A_output(struct msg message) {
     }
 }
 
-/* A_input: handles ACKs */
+/* A_input: process ACK from B */
 void A_input(struct pkt packet) {
     int checksum = compute_checksum(packet);
-    if (checksum == packet.checksum && is_seqnum_in_window(packet.acknum)) {
+    if (checksum == packet.checksum && in_window(packet.acknum)) {
         sender_ack_received[packet.acknum] = true;
 
-        if (packet.acknum == base) {
-            while (sender_ack_received[base]) {
-                sender_ack_received[base] = false;
-                base = (base + 1) % SEQSPACE;
-            }
-            if (base != nextseqnum) {
-                start_timer();
-            } else {
-                stop_timer();
-            }
+        while (sender_ack_received[base]) {
+            sender_ack_received[base] = false;
+            base = (base + 1) % SEQSPACE;
+        }
+
+        if (base == nextseqnum) {
+            stop_timer();
+        } else {
+            start_timer();
         }
     }
 }
 
-/* A_timerinterrupt: retransmit oldest unacked packet */
+/* A_timerinterrupt: retransmit base packet */
 void A_timerinterrupt(void) {
-    int i;
-    for (i = 0; i < SEQSPACE; i++) {
-        if (!sender_ack_received[i] && is_seqnum_in_window(i)) {
-            tolayer3(A, sender_buffer[i]);
-            break;  /* retransmit only one for now */
-        }
+    if (!sender_ack_received[base]) {
+        tolayer3(A, sender_buffer[base]);
     }
     start_timer();
 }
 
-/* A_init: sender init */
+/* A_init: initialize sender */
 void A_init(void) {
     int i;
     base = 0;
@@ -119,7 +111,7 @@ void A_init(void) {
     }
 }
 
-/* B_input: receives packets */
+/* B_input: receive and acknowledge */
 void B_input(struct pkt packet) {
     int checksum = compute_checksum(packet);
     struct pkt ack_pkt;
@@ -144,7 +136,7 @@ void B_input(struct pkt packet) {
     }
 }
 
-/* B_init: receiver init */
+/* B_init: initialize receiver */
 void B_init(void) {
     int i;
     expectedseqnum = 0;
@@ -153,6 +145,7 @@ void B_init(void) {
     }
 }
 
-/* B_output and B_timerinterrupt are unused */
+/* Unused */
 void B_output(struct msg message) {}
 void B_timerinterrupt(void) {}
+
